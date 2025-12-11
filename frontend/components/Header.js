@@ -1,6 +1,37 @@
 import Link from 'next/link';
+import { useState } from 'react';
 
 export default function Header() {
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState('');
+
+  const generateArticle = async () => {
+    setLoading(true);
+    setMessage('');
+
+    try {
+      const apiBase = process.env.NEXT_PUBLIC_API_BASE || 'http://localhost:4000';
+      const response = await fetch(`${apiBase}/generate`, {
+        method: 'POST',
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setMessage('✓ Article generated!');
+        setTimeout(() => {
+          window.location.reload();
+        }, 1000);
+      } else {
+        setMessage('✗ Failed to generate');
+      }
+    } catch (error) {
+      setMessage('✗ Error occurred');
+    } finally {
+      setLoading(false);
+      setTimeout(() => setMessage(''), 3000);
+    }
+  };
+
   return (
     <header className="bg-charcoal shadow-lg">
       <div className="container mx-auto px-4 py-6">
@@ -26,17 +57,24 @@ export default function Header() {
               <h1 className="text-3xl font-bold text-gold">AutoBlog</h1>
             </div>
           </Link>
-          <nav className="hidden md:flex space-x-6">
+          <nav className="hidden md:flex space-x-6 items-center">
             <Link href="/">
               <span className="text-cream hover:text-gold transition-colors cursor-pointer font-medium">
                 Home
               </span>
             </Link>
-            <Link href="/about">
-              <span className="text-cream hover:text-gold transition-colors cursor-pointer font-medium">
-                About
+            <button
+              onClick={generateArticle}
+              disabled={loading}
+              className="bg-gold hover:bg-stone text-charcoal font-semibold py-2 px-6 rounded-lg transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {loading ? 'Generating...' : '✨ Generate Article'}
+            </button>
+            {message && (
+              <span className={`text-sm font-medium ${message.startsWith('✓') ? 'text-green-400' : 'text-red-400'}`}>
+                {message}
               </span>
-            </Link>
+            )}
           </nav>
         </div>
       </div>
