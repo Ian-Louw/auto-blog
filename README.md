@@ -4,6 +4,8 @@ A full-stack blog platform that automatically generates articles daily using AI.
 
 **Live Demo:** Coming soon (deploy your own instance!)
 
+> **Note:** This project includes automated CI/CD via GitHub Actions.
+
 ## What It Does
 
 - Generates a new blog article every day at 2:00 AM UTC using HuggingFace AI
