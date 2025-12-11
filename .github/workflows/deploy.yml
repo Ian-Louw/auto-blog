@@ -1,0 +1,110 @@
+name: Build and Deploy to ECR
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+env:
+  AWS_REGION: eu-west-3
+  ECR_BACKEND_REPO: auto-blog-backend
+  ECR_FRONTEND_REPO: auto-blog-frontend
+  # Add these as GitHub Secrets in your repository:
+  # - AWS_ACCOUNT_ID: Your AWS account ID
+  # - NEXT_PUBLIC_API_BASE: Your EC2 public IP with port (e.g., http://YOUR_EC2_IP:4000)
+
+jobs:
+  build-and-push:
+    name: Build and Push Docker Images
+    runs-on: ubuntu-latest
+
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Extract Git commit SHA
+        id: vars
+        run: echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Build and push backend image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ steps.vars.outputs.sha_short }}
+        run: |
+          cd backend
+          docker buildx build \
+            --platform linux/amd64 \
+            --tag $ECR_REGISTRY/$ECR_BACKEND_REPO:latest \
+            --tag $ECR_REGISTRY/$ECR_BACKEND_REPO:$IMAGE_TAG \
+            --push \
+            .
+
+      - name: Build and push frontend image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ steps.vars.outputs.sha_short }}
+        run: |
+          cd frontend
+          docker buildx build \
+            --platform linux/amd64 \
+            --build-arg NEXT_PUBLIC_API_BASE=${{ secrets.NEXT_PUBLIC_API_BASE }} \
+            --tag $ECR_REGISTRY/$ECR_FRONTEND_REPO:latest \
+            --tag $ECR_REGISTRY/$ECR_FRONTEND_REPO:$IMAGE_TAG \
+            --push \
+            .
+
+      - name: Image digest
+        run: |
+          echo "Backend Image: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_BACKEND_REPO }}:${{ steps.vars.outputs.sha_short }}"
+          echo "Frontend Image: ${{ steps.login-ecr.outputs.registry }}/${{ env.ECR_FRONTEND_REPO }}:${{ steps.vars.outputs.sha_short }}"
+
+  deploy:
+    name: Deploy to EC2
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+
+    steps:
+      - name: Deploy to EC2 via SSH
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            cd ~/auto-blog
+
+            # Login to ECR
+            aws ecr get-login-password --region eu-west-3 | \
+              docker login --username AWS --password-stdin \
+              ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.eu-west-3.amazonaws.com
+
+            # Pull latest images
+            docker-compose pull
+
+            # Restart containers with new images
+            docker-compose up -d --force-recreate
+
+            # Show status
+            echo "Deployment complete! Container status:"
+            docker-compose ps

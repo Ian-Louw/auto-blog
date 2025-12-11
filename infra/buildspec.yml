@@ -1,0 +1,63 @@
+version: 0.2
+
+# This buildspec is used by AWS CodeBuild to:
+# 1. Build Docker images for frontend and backend
+# 2. Push images to Amazon ECR
+# 3. Optionally trigger deployment to EC2
+
+phases:
+  pre_build:
+    commands:
+      - echo Logging in to Amazon ECR...
+      - aws --version
+      - REPOSITORY_URI_BACKEND=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/auto-blog-backend
+      - REPOSITORY_URI_FRONTEND=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/auto-blog-frontend
+      - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
+      - IMAGE_TAG=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c 1-7)
+      - echo Building version $IMAGE_TAG
+
+  build:
+    commands:
+      - echo Build started on `date`
+
+      # Build backend image
+      - echo Building backend Docker image...
+      - cd backend
+      - docker build -t $REPOSITORY_URI_BACKEND:latest .
+      - docker tag $REPOSITORY_URI_BACKEND:latest $REPOSITORY_URI_BACKEND:$IMAGE_TAG
+      - cd ..
+
+      # Build frontend image with API base URL
+      # Note: Set NEXT_PUBLIC_API_BASE as environment variable in CodeBuild project settings
+      # Example: http://YOUR_EC2_IP:4000
+      - echo Building frontend Docker image...
+      - cd frontend
+      - docker build --build-arg NEXT_PUBLIC_API_BASE=${NEXT_PUBLIC_API_BASE:-http://localhost:4000} -t $REPOSITORY_URI_FRONTEND:latest .
+      - docker tag $REPOSITORY_URI_FRONTEND:latest $REPOSITORY_URI_FRONTEND:$IMAGE_TAG
+      - cd ..
+
+      - echo Build completed on `date`
+
+  post_build:
+    commands:
+      - echo Build completed on `date`
+      - echo Pushing Docker images to ECR...
+
+      # Push backend images
+      - docker push $REPOSITORY_URI_BACKEND:latest
+      - docker push $REPOSITORY_URI_BACKEND:$IMAGE_TAG
+
+      # Push frontend images
+      - docker push $REPOSITORY_URI_FRONTEND:latest
+      - docker push $REPOSITORY_URI_FRONTEND:$IMAGE_TAG
+
+      - echo Images pushed successfully
+      - echo REPOSITORY_URI_BACKEND=$REPOSITORY_URI_BACKEND:$IMAGE_TAG
+      - echo REPOSITORY_URI_FRONTEND=$REPOSITORY_URI_FRONTEND:$IMAGE_TAG
+
+# Optional: If you want to output artifact for deployment
+artifacts:
+  files:
+    - infra/docker-compose.yml
+    - infra/scripts/**/*
+  name: deployment-artifacts

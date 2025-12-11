@@ -1,0 +1,76 @@
+version: '3.8'
+
+# Production docker-compose for EC2 deployment
+# This file uses pre-built images from ECR instead of building locally
+
+services:
+  postgres:
+    image: postgres:14-alpine
+    container_name: auto-blog-postgres
+    environment:
+      POSTGRES_USER: ${DB_USER:-bloguser}
+      POSTGRES_PASSWORD: ${DB_PASS:-blogpass}
+      POSTGRES_DB: ${DB_NAME:-blogdb}
+    volumes:
+      - /var/lib/auto-blog/pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-bloguser}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - blog-network
+
+  backend:
+    # Replace ACCOUNT_ID and REGION with your AWS values
+    image: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/auto-blog-backend:latest
+    container_name: auto-blog-backend
+    environment:
+      DB_HOST: postgres
+      DB_USER: ${DB_USER:-bloguser}
+      DB_PASS: ${DB_PASS:-blogpass}
+      DB_NAME: ${DB_NAME:-blogdb}
+      HF_TOKEN: ${HF_TOKEN}
+      HF_MODEL: ${HF_MODEL:-gpt2}
+      PORT: 4000
+      NODE_ENV: production
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "4000:4000"
+    restart: unless-stopped
+    networks:
+      - blog-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  frontend:
+    # Replace ACCOUNT_ID and REGION with your AWS values
+    image: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/auto-blog-frontend:latest
+    container_name: auto-blog-frontend
+    environment:
+      NEXT_PUBLIC_API_BASE: ${NEXT_PUBLIC_API_BASE}
+      NODE_ENV: production
+    depends_on:
+      - backend
+    ports:
+      - "80:3000"
+    restart: unless-stopped
+    networks:
+      - blog-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  blog-network:
+    driver: bridge
